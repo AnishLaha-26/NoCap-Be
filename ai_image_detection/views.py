@@ -8,6 +8,7 @@ import json
 import re
 import base64
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ def analyze_image(request):
 @api_view(['POST'])
 def analyze_image_ai(request):
     """
-    Analyze image for AI generation detection using Hack Club AI API
+    Analyze image for AI generation detection using OpenAI GPT-4o
     Accepts base64 encoded images from frontend
     """
     image_base64 = request.data.get('image_base64', '')
@@ -83,19 +84,50 @@ def analyze_image_ai(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Initialize OpenAI client with API key from environment variables
+        try:
+            import os
+            import logging
+            from openai import OpenAI
+            
+            # Get API key from environment variables
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY environment variable is not set")
+            
+            # Log the API key for debugging (first few characters only)
+            logger.info(f"Initializing OpenAI client with API key: {api_key[:8]}...")
+            
+            # Create client configuration without any proxy settings
+            client_config = {
+                'api_key': api_key,
+            }
+            
+            # Initialize the client with explicit configuration
+            client = OpenAI(**client_config)
+        except Exception as init_error:
+            logger.error(f"Failed to initialize OpenAI client: {str(init_error)}")
+            return Response(
+                {
+                    'error': 'Failed to initialize AI service',
+                    'details': str(init_error)
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        
         # Create comprehensive prompt for AI image detection
-        analysis_prompt = f"""
+        analysis_prompt = """
 Analyze the provided image for AI generation detection. Look for common AI-generated image artifacts and patterns.
 
 Provide your analysis in this exact JSON format:
-{{
+{
     "ai_likelihood_percentage": <number between 0-100>,
     "ai_reasoning": "<brief explanation of AI detection analysis>",
     "ai_confidence": "<high/medium/low>",
     "detected_artifacts": ["<list of specific AI artifacts found>"],
     "image_quality_score": <number between 0-100>,
     "authenticity_score": <number between 0-100>
-}}
+}
 
 Focus on detecting:
 - Unnatural textures or smoothing
@@ -104,20 +136,16 @@ Focus on detecting:
 - Repetitive patterns or artifacts
 - Digital compression anomalies typical of AI generation
 - Style inconsistencies
-
-Image (base64): {image_base64[:100]}...
+- Watermarks or signatures that might indicate AI generation
+- Pixel-level artifacts common in diffusion models
 """
         
-        # Make request to Hack Club AI API
-        api_url = "https://ai.hackclub.com/chat/completions"
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "messages": [
+        # Make request to OpenAI GPT-4o
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
                 {
-                    "role": "user", 
+                    "role": "user",
                     "content": [
                         {
                             "type": "text",
@@ -131,24 +159,25 @@ Image (base64): {image_base64[:100]}...
                         }
                     ]
                 }
-            ]
-        }
+            ],
+            max_tokens=1000
+        )
         
-        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        
-        ai_response = response.json()
-        ai_content = ai_response.get('choices', [{}])[0].get('message', {}).get('content', '')
+        ai_content = response.choices[0].message.content
         
         # Try to parse the AI response as JSON
         try:
             # Extract JSON from the response if it's wrapped in markdown or other text
-            json_match = re.search(r'\{[^}]*"ai_likelihood_percentage"[^}]*"authenticity_score"[^}]*\}', ai_content)
+            json_match = re.search(r'\{[^}]*"ai_likelihood_percentage"[^}]*"authenticity_score"[^}]*\}', ai_content, re.DOTALL)
             if json_match:
                 analysis_data = json.loads(json_match.group())
             else:
-                # Fallback parsing if JSON format is not found
-                raise ValueError("No valid JSON found in response")
+                # Try to find JSON block in markdown
+                json_block_match = re.search(r'```json\s*(\{.*?\})\s*```', ai_content, re.DOTALL)
+                if json_block_match:
+                    analysis_data = json.loads(json_block_match.group(1))
+                else:
+                    raise ValueError("No valid JSON found in response")
         except (json.JSONDecodeError, ValueError):
             # Fallback: parse manually or provide default analysis
             logger.warning(f"Could not parse AI response as JSON: {ai_content}")
@@ -182,29 +211,19 @@ Image (base64): {image_base64[:100]}...
             'image_quality_score': analysis_data.get('image_quality_score', 70),
             'authenticity_score': analysis_data.get('authenticity_score', 50),
             # Metadata
-            'model_used': 'Hack Club AI Service',
+            'model_used': 'OpenAI GPT-4o',
             'analysis_type': 'image_ai_detection',
             'timestamp': request.META.get('HTTP_DATE', '')
         }
         
         return Response(result)
         
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling Hack Club AI API: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error calling OpenAI API: {str(e)}")
         return Response(
             {
                 'error': 'Failed to analyze image - AI service unavailable',
                 'details': str(e)
             },
             status=status.HTTP_503_SERVICE_UNAVAILABLE
-        )
-    
-    except Exception as e:
-        logger.error(f"Unexpected error in image analysis: {str(e)}")
-        return Response(
-            {
-                'error': 'Internal server error during image analysis',
-                'details': str(e)
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
