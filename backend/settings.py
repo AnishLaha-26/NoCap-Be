@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     
     # Local apps
     'api.apps.ApiConfig',
+    'claude_integration.apps.ClaudeIntegrationConfig',
 ]
 
 MIDDLEWARE = [

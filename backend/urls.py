@@ -25,6 +25,7 @@ urlpatterns = [
     
     # API URLs
     path('api/', include('api.urls')),
+    path('claude/', include('claude_integration.urls')),
     
     # DRF's browsable API auth
     path('api-auth/', include('rest_framework.urls')),
