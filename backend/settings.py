@@ -49,7 +49,10 @@ INSTALLED_APPS = [
     
     # Local apps
     'api.apps.ApiConfig',
-    'claude_integration.apps.ClaudeIntegrationConfig',
+    'text_ai_detection.apps.TextAiDetectionConfig',
+    'fake_news_detection.apps.FakeNewsDetectionConfig',
+    'ai_image_detection.apps.AiImageDetectionConfig',
+    'deepfake_detection.apps.DeepfakeDetectionConfig',
 ]
 
 MIDDLEWARE = [
