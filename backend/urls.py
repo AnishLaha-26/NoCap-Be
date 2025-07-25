@@ -25,7 +25,13 @@ urlpatterns = [
     
     # API URLs
     path('api/', include('api.urls')),
-    path('claude/', include('claude_integration.urls')),
+    # path('claude/', include('claude_integration.urls')),  # Temporarily commented out - app doesn't exist
+    
+    # AI Detection Services
+    path('text-ai-detection/', include('text_ai_detection.urls')),
+    path('fake-news-detection/', include('fake_news_detection.urls')),
+    path('ai-image-detection/', include('ai_image_detection.urls')),
+    path('deepfake-detection/', include('deepfake_detection.urls')),
     
     # DRF's browsable API auth
     path('api-auth/', include('rest_framework.urls')),

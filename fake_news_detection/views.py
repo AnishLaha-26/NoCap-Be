@@ -45,3 +45,4 @@ def analyze_news(request):
     }
     
     return Response(result)
+
