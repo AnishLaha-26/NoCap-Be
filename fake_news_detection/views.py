@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseServerError
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
@@ -10,7 +10,6 @@ import logging
 import asyncio
 import time
 from urllib.parse import urlparse
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseServerError
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
@@ -60,17 +59,26 @@ def analyze_news(request):
     print(f"Processing URL: {url}")  # Debug log
     
     try:
-        # Run the async function in an event loop
-        import asyncio
+        # Run the async function in the event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
-        # Extract text from URL using async function
-        extracted_data = loop.run_until_complete(extract_data_from_url_async(url))
-        print(f"Extraction result: {extracted_data.get('status', 'unknown')}")  # Debug log
+        try:
+            extracted_data = loop.run_until_complete(extract_data_from_url_async(url))
+        finally:
+            loop.close()
         
         if not extracted_data.get('success', False):
-            print(f"Extraction failed: {extracted_data.get('error', 'Unknown error')}")  # Debug log
+            if extracted_data.get('status') == 'blocked':
+                return Response(
+                    {
+                        'error': extracted_data.get('error', 'This website is blocking our access'),
+                        'status': 'blocked',
+                        'error_code': 403,
+                        'message': 'Please use the "Paste Text" feature to check this content.'
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
             return Response(
                 {'error': extracted_data.get('error', 'Failed to extract content from URL')},
                 status=status.HTTP_400_BAD_REQUEST
@@ -285,7 +293,18 @@ async def extract_data_from_url_async(url, max_retries=3, timeout=30):
                 if attempt == max_retries - 1:  # Last attempt
                     error_details = str(e)
                     if hasattr(e, 'response') and e.response is not None:
-                        error_details += f" | Status Code: {e.response.status_code}"
+                        status_code = getattr(e.response, 'status_code', None)
+                        error_details += f" | Status Code: {status_code}"
+                        
+                        # Special handling for 403 Forbidden
+                        if status_code == 403:
+                            return {
+                                'success': False,
+                                'error': 'This website is blocking our access. Please use the "Paste Text" feature to check this content.',
+                                'status': 'blocked',
+                                'error_code': 403
+                            }
+                            
                         if hasattr(e.response, 'text'):
                             error_details += f" | Response: {e.response.text[:200]}"
                     return {
