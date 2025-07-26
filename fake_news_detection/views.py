@@ -247,4 +247,3 @@ Provide your analysis in this exact JSON format:
         }
 
 
-ter
