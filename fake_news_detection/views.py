@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status
 import requests
 import json
+import time
 
 
 @api_view(['GET'])
@@ -36,12 +37,21 @@ def analyze_news(request):
         )
     
     try:
-        # Step 1: Extract content from URL using Extractor API
+        # Step 1: Extract content from URL using Extractor API with retries
         extracted_data = extract_data_from_url(url)
+        
+        # Handle error response from extract_data_from_url
+        if extracted_data and 'error' in extracted_data:
+            return Response(
+                {'error': extracted_data['error']},
+                status=status.HTTP_504_GATEWAY_TIMEOUT if 'timeout' in str(extracted_data.get('error', '')).lower() 
+                      else status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
         if not extracted_data:
             return Response(
-                {'error': 'Failed to extract content from URL'}, 
-                status=status.HTTP_400_BAD_REQUEST
+                {'error': 'Failed to extract content from URL after multiple attempts'}, 
+                status=status.HTTP_504_GATEWAY_TIMEOUT
             )
         
         # Step 2: Fact-check using the full API response data
@@ -63,16 +73,27 @@ def analyze_news(request):
         return Response(result)
     
     except Exception as e:
+        error_msg = str(e)
+        print(f"Error in analyze_news: {error_msg}")
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        
+        # Provide more specific error messages for common issues
+        if 'timeout' in error_msg.lower():
+            error_msg = "The request timed out while processing the URL"
+            status_code = status.HTTP_504_GATEWAY_TIMEOUT
+        elif 'connection' in error_msg.lower():
+            error_msg = "Could not connect to the content extraction service"
+        
         return Response(
-            {'error': f'Analysis failed: {str(e)}'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            {'error': error_msg}, 
+            status=status_code
         )
 
 
-def extract_data_from_url(url):
+def extract_data_from_url(url, max_retries=3, initial_timeout=30):
     """
-    Extract full data from URL using Extractor API
-    Returns the complete API response JSON for comprehensive fact-checking
+    Extract full data from URL using Extractor API with retries and backoff
+    Returns the complete API response JSON or error dict if all retries fail
     """
     API_KEY = "97eb467b8ae65f155821a44df22fadbb051f2020"
     api_url = "https://extractorapi.com/api/v1/extractor/"
@@ -80,49 +101,66 @@ def extract_data_from_url(url):
     params = {
         "apikey": API_KEY,
         "url": url,
-        "fields": "title,author,date_published,domain,images"  # Request additional metadata
+        "fields": "title,author,date_published,domain,images"
     }
     
-    try:
-        print(f"Sending request to Extractor API for URL: {url}")
-        response = requests.get(api_url, params=params, timeout=30)
-        print(f"Response status: {response.status_code}")
-        print(f"Response content: {response.text[:500]}...")  # Print first 500 chars of response
-        
-        if response.status_code == 200:
-            try:
+    for attempt in range(max_retries):
+        try:
+            # Increase timeout with each retry (exponential backoff)
+            timeout = initial_timeout * (attempt + 1)
+            print(f"Attempt {attempt + 1}/{max_retries} - Timeout: {timeout}s")
+            
+            response = requests.get(
+                api_url, 
+                params=params, 
+                timeout=timeout
+            )
+            
+            if response.status_code == 200:
                 data = response.json()
-                print(f"Parsed JSON data keys: {list(data.keys())}")
-                
-                # Check if the response contains text (successful extraction)
                 if 'text' in data and data['text']:
                     print("Successfully extracted data from URL")
-                    return data  # Return the full JSON response
+                    return data
                 elif 'status' in data and data['status'] == 'error':
                     error_msg = f"Extractor API Error: {data.get('message', 'Unknown error')}"
                     print(error_msg)
-                    return None
                 else:
                     print("No text content found in response")
-                    return None
-                    
-            except json.JSONDecodeError:
-                error_msg = "Failed to parse API response as JSON"
-                print(error_msg)
-                return None
-        else:
-            error_msg = f"Extractor API Error ({response.status_code}): {response.text}"
-            print(error_msg)
-            return None
+            else:
+                print(f"Extractor API Error ({response.status_code}): {response.text}")
             
-    except requests.exceptions.RequestException as e:
-        error_msg = f"Request failed: {str(e)}"
-        print(error_msg)
-        return None
-    except Exception as e:
-        error_msg = f"Unexpected error: {str(e)}"
-        print(error_msg)
-        return None
+            # If we get here, the request failed but didn't raise an exception
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                
+        except requests.exceptions.Timeout:
+            error_msg = f"Request timed out after {timeout} seconds"
+            print(error_msg)
+            if attempt == max_retries - 1:
+                return {
+                    "error": "Request to content extraction service timed out",
+                    "status": "error"
+                }
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Request failed: {str(e)}"
+            print(error_msg)
+            if attempt == max_retries - 1:
+                return {
+                    "error": f"Failed to fetch content: {str(e)}",
+                    "status": "error"
+                }
+        except Exception as e:
+            error_msg = f"Unexpected error: {str(e)}"
+            print(error_msg)
+            if attempt == max_retries - 1:
+                return {
+                    "error": "An unexpected error occurred while processing the request",
+                    "status": "error"
+                }
+    
+    return None
 
 
 def fact_check_with_ai(extracted_data):
