@@ -7,3 +7,6 @@ openai==1.52.0
 httpx==0.27.2
 gunicorn==21.2.0
 whitenoise==6.6.0
+beautifulsoup4==4.12.3
+lxml==5.2.1
+boilerpy3==1.0.7
