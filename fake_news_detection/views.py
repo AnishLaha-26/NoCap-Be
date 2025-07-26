@@ -151,7 +151,18 @@ async def extract_data_from_url_async(url, max_retries=3, timeout=30):
     Extract text and metadata from a URL using a simple and reliable approach.
     """
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.google.com/'
     }
     
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
@@ -169,21 +180,59 @@ async def extract_data_from_url_async(url, max_retries=3, timeout=30):
                 if soup.title and soup.title.string:
                     title = soup.title.string.strip()
                 
-                # Remove script, style, and other non-content elements
-                for element in soup(['script', 'style', 'noscript', 'iframe', 'svg', 'button', 'nav', 'footer', 'header']):
+                # Try to find the main article content
+                article = None
+                article_selectors = [
+                    'article',
+                    'div.article',
+                    'div.article-content',
+                    'div.entry-content',
+                    'div.post-content',
+                    'div.story',
+                    'div.story-content',
+                    'div.content',
+                    'div.main-content',
+                    'div[class*="content"]',
+                    'div[class*="article"]',
+                    'div[class*="post"]',
+                    'div[class*="entry"]',
+                    'div[class*="story"]',
+                    'main',
+                    'div#main',
+                    'div#content',
+                    'div#article'
+                ]
+                
+                for selector in article_selectors:
+                    article = soup.select_one(selector)
+                    if article:
+                        break
+                
+                # If we found an article container, use that; otherwise use the whole page
+                content_source = article if article else soup
+                
+                # Remove unwanted elements
+                for element in content_source(['script', 'style', 'noscript', 'iframe', 'svg', 'button', 'nav', 'footer', 'header', 'aside', 'form']):
                     element.decompose()
                 
-                # Get all text content with basic formatting
-                full_text = soup.get_text(separator='\n', strip=True)
+                # Extract text from paragraphs and headers
+                text_parts = []
+                for element in content_source.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+                    text = element.get_text(separator=' ', strip=True)
+                    if text and len(text) > 20:  # Only include non-empty text with reasonable length
+                        if element.name.startswith('h'):
+                            text_parts.append(f'\n\n{text.upper()}\n')
+                        else:
+                            text_parts.append(text)
+                
+                full_text = '\n'.join(text_parts)
+                
+                # If we still don't have enough content, fall back to getting all text
+                if len(full_text) < 100:
+                    full_text = content_source.get_text(separator='\n', strip=True)
                 
                 # Clean up the text
                 full_text = '\n'.join(line.strip() for line in full_text.splitlines() if line.strip())
-                
-                # If we don't have enough text, try to get paragraphs
-                if len(full_text) < 100:
-                    paragraphs = soup.find_all('p')
-                    if paragraphs:
-                        full_text = '\n\n'.join(p.get_text().strip() for p in paragraphs if p.get_text().strip())
                 
                 # If still no content, use the raw text (first 10,000 chars)
                 if not full_text.strip():
