@@ -32,6 +32,7 @@ urlpatterns = [
     path('fake-news-detection/', include('fake_news_detection.urls')),
     path('ai-image-detection/', include('ai_image_detection.urls')),
     path('deepfake-detection/', include('deepfake_detection.urls')),
+    path('scam-detection/', include('scam_detector.urls')),
     
     # DRF's browsable API auth
     path('api-auth/', include('rest_framework.urls')),

@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'fake_news_detection.apps.FakeNewsDetectionConfig',
     'ai_image_detection.apps.AiImageDetectionConfig',
     'deepfake_detection.apps.DeepfakeDetectionConfig',
+    'scam_detector.apps.ScamDetectorConfig',
 ]
 
 MIDDLEWARE = [
