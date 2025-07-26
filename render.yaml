@@ -3,7 +3,7 @@ services:
     name: nocap-backend
     env: python
     buildCommand: "./build.sh"
-    startCommand: "gunicorn backend.wsgi:application"
+    startCommand: "gunicorn backend.wsgi:application --timeout 300 --workers 2 --threads 4 --worker-class gthread --log-level=debug --access-logfile - --error-logfile -"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0

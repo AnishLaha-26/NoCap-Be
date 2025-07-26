@@ -90,7 +90,7 @@ def analyze_news(request):
         )
 
 
-def extract_data_from_url(url, max_retries=3, initial_timeout=30):
+def extract_data_from_url(url, max_retries=3, initial_timeout=60):  # Increased initial timeout to 60 seconds
     """
     Extract full data from URL using Extractor API with retries and backoff
     Returns the complete API response JSON or error dict if all retries fail
